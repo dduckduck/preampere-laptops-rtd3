@@ -1,6 +1,10 @@
 import os
 import argparse
-from datetime import datetime
+
+
+# =========================================================
+# Section: Config files
+# =========================================================
 
 SYS_FILES = {
     "chassis": "/sys/class/dmi/id/chassis_type",
@@ -131,10 +135,6 @@ def _validate(value: str, data: str) -> bool:
     return output
 
 
-# page 42
-# https://www.dmtf.org/sites/default/files/standards/documents/DSP0134_3.4.0.pdf
-
-
 def _power_watts(value: str) -> int:
     power_draw = -1
     try:
@@ -143,6 +143,26 @@ def _power_watts(value: str) -> int:
         print(f"Clould not obtain power draw {str(e)}")
     return power_draw*(10**-6)
 
+
+def _create_file(path: str, data: str):
+    print(f"Creating: {path}")
+    try:
+        if os.path.exists(path):
+            print(f"{path} already exists. Creating backup...")
+            backup_path = f"{path}.bak"
+            os.rename(path, backup_path)
+            print(f"Backup created at {backup_path}")
+
+        if not os.path.exists(os.path.dirname(path)):
+            print(f"Creating new file {path}")
+            os.makedirs(os.path.dirname(path))
+
+        with open(path, 'w') as f:
+            print(f"Writing data to : {path}")
+            f.write(data)
+        print(f"Successfully installed {path}")
+    except Exception as e:
+        print(f"Could not finish the installation {str(e)}")
 
 # =========================================================
 # Section: Utilities
@@ -208,27 +228,6 @@ def state() -> dict:
     _print_table(headers, rows, name="Power supply")
 
 
-def _create_file(path: str, data: str):
-    print(f"Creating: {path}")
-    try:
-        if os.path.exists(path):
-            print(f"{path} already exists. Creating backup...")
-            time_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = f"{path}.{time_stamp}.bak"
-            os.rename(path, backup_path)
-            print(f"Backup created at {backup_path}")
-
-        if not os.path.exists(os.path.dirname(path)):
-            print(f"Creating new file {path}")
-            os.makedirs(os.path.dirname(path))
-        with open(path, 'w') as f:
-            print(f"Writing data to : {path}")
-            f.write(data)
-        print(f"Successfully installed {path}")
-    except Exception as e:
-        print(f"Could not finish installation {str(e)}")
-
-
 def install(power_mode: int, enable_firmware: int) -> None:
     print("Starting installation")
     udev_path = _find_file(NVIDIA_FILES["udev"]["path"])
@@ -244,26 +243,37 @@ def install(power_mode: int, enable_firmware: int) -> None:
 
 
 # =========================================================
-# Section: Main
+# Section: Main and arguments
 # =========================================================
 
 
 def setup_args() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="RTD3 Tool")
+    parser = argparse.ArgumentParser(
+        description="RTD3 Tool: A utility for managing and diagnosing NVIDIA GPU power management on hybrid laptops.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     parser_info = subparsers.add_parser("info", help="Shows info")
     parser_info.add_argument("-v", "--verify", action="store_true",
-                             help="Verifies system requirements.")
+                             help="Verifies system requirements as specified in nvidia docs.")
     parser_info.add_argument("-s", "--state", action="store_true",
-                             help="Shows current dGPU state.")
+                             help="Show the current status of the dGPU, battery and indicate if the udev and modprobe files are present.\
+                             If more than one dgpu or battery available, individual information for each device will be shown")
 
     parser_install = subparsers.add_parser(
-        "install", help="Installs udev and modprobe files")
-    parser_install.add_argument("-p", "--powermode", type=int, choices=[0, 1, 2], default=2,
-                                help="Sets power management mode. Default 2")
+        "install", help="install udev and modprobe files. if these files already exist, a backup will be created.\
+                        (If a backup exists, the installation wont be completed.")
+    parser_install.add_argument(
+        "-p", "--powermode", type=int, choices=[0, 1, 2], default=2,
+        help=(
+            "Configure NVIDIA dynamic power management (NVreg_DynamicPowerManagement): \
+            0 - disables D3 power management, 1 - enables coarse-grained power control, 2 - enable fine-grained power control.\
+            Default value is 2. \
+            For more information: https://download.nvidia.com/XFree86/Linux-x86_64/565.77/README/dynamicpowermanagement.html"
+        )
+    )
+
     parser_install.add_argument("-e", "--enablefirmware", type=int, choices=[0, 1], default=0,
-                                help="Checks firmware status (1) or disables check (0). Default 0")
+                                help="Enables (1) or disables (0) GpuFirmware. Only works on the closed source driver. Default 0.")
     return parser
 
 
