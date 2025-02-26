@@ -15,6 +15,7 @@ SYS_FILES = {
 
 DGPU_FILES = {
     "gpus": "/proc/driver/nvidia/gpus/",
+    #    "model": "/proc/driver/nvidia/gpus/{}/information",
     "rtd3_status": "/proc/driver/nvidia/gpus/{}/power",
     "power_state": "/sys/bus/pci/devices/{}/power_state",
     "runtime_status": "/sys/bus/pci/devices/{}/power/runtime_status"
@@ -30,8 +31,8 @@ BAT_FILES = {
 NVIDIA_FILES = {
     "udev": {  # Requires root access
         "path": [
-            "/lib/udev/rules.d/80-nvidia-pm.rules",
-            "/etc/udev/rules.d/80-nvidia-pm.rules"
+            "/etc/udev/rules.d/80-nvidia-pm.rules",
+            "/lib/udev/rules.d/80-nvidia-pm.rules"
         ],
         "value": """# Enable runtime PM for NVIDIA VGA/3D controller devices on driver bind
 ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", TEST=="power/control", ATTR{power/control}="auto"
@@ -144,14 +145,24 @@ def _power_watts(value: str) -> int:
     return power_draw*(10**-6)
 
 
-def _create_file(path: str, data: str):
+def _create_file(path: str, data: str, force: bool = False):
     print(f"Creating: {path}")
     try:
         if os.path.exists(path):
             print(f"{path} already exists. Creating backup...")
             backup_path = f"{path}.bak"
-            os.rename(path, backup_path)
-            print(f"Backup created at {backup_path}")
+            if os.path.exists(backup_path):
+                if not force:
+                    print(
+                        "Backup already exists. The operation is canceled. Use --force to overwrite.")
+                    return
+                else:
+                    print("--force is issued. The file will be overwritten and no backup will be created")
+                    pass
+            else:
+                print(f"Crearing backup")
+                os.rename(path, backup_path)
+                print(f"Backup created at {backup_path}")
 
         if not os.path.exists(os.path.dirname(path)):
             print(f"Creating new file {path}")
@@ -164,6 +175,17 @@ def _create_file(path: str, data: str):
     except Exception as e:
         print(f"Could not finish the installation {str(e)}")
 
+
+def _delete_file(file: str) -> None:
+    print(f"Deleting {file}")
+    for path in NVIDIA_FILES[file]["path"]:
+        if os.path.exists(path):
+            print(f"Removing: {path}")
+            os.remove(path)
+        if os.path.exists(path + ".bak"):
+            print(f"Restoring backup: {path}.bak -> {path}")
+            os.rename(path + ".bak", path)
+    print("Uninstallation process completed.")
 # =========================================================
 # Section: Utilities
 # =========================================================
@@ -202,10 +224,15 @@ def verify() -> dict:
 
 
 def state() -> dict:
-    slots = _list_dir(DGPU_FILES["gpus"])
-    for slot in slots:
-        headers = ["key", "value"]
-        rows = []
+    gpus_dirs = _list_dir(DGPU_FILES["gpus"])
+    gpus_dirs = [vga_func for vga_func in gpus_dirs if vga_func.split('.')[
+        1] == '0']
+    if len(gpus_dirs) > 1:
+        print("! More than one NVIDIA gpu is available.")
+    headers = ["key", "value"]
+    rows = []
+    for slot in gpus_dirs:
+        rows.append(["pci", slot])
         for key, value in [(k, v) for (k, v) in DGPU_FILES.items() if k != "gpus"]:
             raw_file = _read_file(value.format(slot))
             data = _extract_data(key, raw_file)
@@ -228,19 +255,23 @@ def state() -> dict:
     _print_table(headers, rows, name="Power supply")
 
 
-def install(power_mode: int, enable_firmware: int) -> None:
+def install(power_mode: int, enable_firmware: int, force: bool) -> None:
     print("Starting installation")
     udev_path = _find_file(NVIDIA_FILES["udev"]["path"])
     udev_path = udev_path if udev_path else NVIDIA_FILES["udev"]["path"][0]
     udev_data = NVIDIA_FILES["udev"]["value"]
-    _create_file(udev_path, udev_data)
+    _create_file(udev_path, udev_data, force)
 
     modprobe_path = _find_file(NVIDIA_FILES["modprobe"]["path"])
     modprobe_path = modprobe_path if modprobe_path else NVIDIA_FILES["modprobe"]["path"][0]
     modprobe_data = NVIDIA_FILES["modprobe"]["value_template"].format(
         power_mode, enable_firmware)
-    _create_file(modprobe_path, modprobe_data)
+    _create_file(modprobe_path, modprobe_data, force)
 
+
+def uninstall() -> None:
+    _delete_file("udev")
+    _delete_file("modprobe")
 
 # =========================================================
 # Section: Main and arguments
@@ -271,9 +302,13 @@ def setup_args() -> argparse.ArgumentParser:
             For more information: https://download.nvidia.com/XFree86/Linux-x86_64/565.77/README/dynamicpowermanagement.html"
         )
     )
-
     parser_install.add_argument("-e", "--enablefirmware", type=int, choices=[0, 1], default=0,
                                 help="Enables (1) or disables (0) GpuFirmware. Only works on the closed source driver. Default 0.")
+    parser_install.add_argument("-f", "--force", action="store_true", default=False,
+                                help="When this flag is enabled, the udev and modprobe files will be overwritten without creatng a backup. Proceed with caution.")
+
+    parser_uninstall = subparsers.add_parser(
+        "uninstall", help="Deletes udev and modprobe files. If backups are available, the original content will be restored.")
     return parser
 
 
@@ -286,7 +321,9 @@ def main(parser: argparse.ArgumentParser) -> None:
             elif args.state:
                 state()
         case "install":
-            install(args.powermode, args.enablefirmware)
+            install(args.powermode, args.enablefirmware, args.force)
+        case "uninstall":
+            uninstall()
         case _:
             parser.print_help()
 
