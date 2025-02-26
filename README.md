@@ -24,5 +24,59 @@ Additionally, NVIDIA has specific requirements that your system must meet to ena
 This tool helps you determine if your system supports RTD3, monitor its current state, and install/uninstall the necessary files to enable RTD3 functionality.
 
 # Usage
-to do
 
+## General overview
+```
+usage: rtd3.py [-h] {info,install,uninstall} ...
+
+RTD3 Tool: A utility for managing and diagnosing NVIDIA GPU power management on hybrid laptops.
+
+positional arguments:
+  {info,install,uninstall}
+    info                Shows info
+    install             install udev and modprobe files. if these files already exist, a backup will be
+                        created. (If a backup exists, the installation wont be completed).
+    uninstall           Deletes udev and modprobe files. If backups are available, the original content
+                        will be restored.
+
+```
+
+## Command info
+
+```
+usage: rtd3.py info [-h] [-v] [-s]
+
+options:
+  -h, --help    show this help message and exit
+  -v, --verify  Verifies system requirements as specified in nvidia docs.
+  -s, --state   Show the current status of the dGPU, battery and indicate if the udev and modprobe
+                files are present. If more than one dgpu or battery available, individual information
+                for each device will be shown
+```
+
+## Command install
+
+```
+usage: rtd3.py install [-h] [-p {0,1,2}] [-e {0,1}] [-f]
+
+options:
+  -h, --help            show this help message and exit
+  -p, --powermode {0,1,2}
+                        Configure NVIDIA dynamic power management (NVreg_DynamicPowerManagement): 0 -
+                        disables D3 power management, 1 - enables coarse-grained power control, 2 -
+                        enable fine-grained power control. Default value is 2. For more information: ht
+                        tps://download.nvidia.com/XFree86/Linux-
+                        x86_64/565.77/README/dynamicpowermanagement.html
+  -e, --enablefirmware {0,1}
+                        Enables (1) or disables (0) GpuFirmware. Only works on the closed source
+                        driver. Default 0.
+  -f, --force           When this flag is enabled, the udev and modprobe files will be overwritten
+                        without creatng a backup. Proceed with caution.
+```
+
+## Command uninstall
+no arguments required
+
+
+## Examples
+to do
