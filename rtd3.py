@@ -47,7 +47,7 @@ ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x0302
             "/etc/modprobe.d/nvidia-pm.conf",
             "/etc/modprobe.d/nvidia.conf"
         ],
-        "value_template": """options nvidia NVreg_DynamicPowerManagement=0x0{}
+        "value": """options nvidia NVreg_DynamicPowerManagement=0x0{}
 options nvidia NVreg_EnableGpuFirmware={}
 """
     }
@@ -265,7 +265,7 @@ def install(power_mode: int, enable_firmware: int, force: bool) -> None:
 
     modprobe_path = _find_file(NVIDIA_FILES["modprobe"]["path"])
     modprobe_path = modprobe_path if modprobe_path else NVIDIA_FILES["modprobe"]["path"][0]
-    modprobe_data = NVIDIA_FILES["modprobe"]["value_template"].format(
+    modprobe_data = NVIDIA_FILES["modprobe"]["value"].format(
         power_mode, enable_firmware)
     _create_file(modprobe_path, modprobe_data, force)
 
