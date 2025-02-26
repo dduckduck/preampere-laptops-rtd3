@@ -1,4 +1,4 @@
-Thi project is presented as is.
+This project is presented as is.
 
 # RTD3 Tool
 
