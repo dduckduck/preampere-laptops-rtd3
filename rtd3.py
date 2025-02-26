@@ -157,7 +157,8 @@ def _create_file(path: str, data: str, force: bool = False):
                         "Backup already exists. The operation is canceled. Use --force to overwrite.")
                     return
                 else:
-                    print("--force is issued. The file will be overwritten and no backup will be created")
+                    print(
+                        "--force is issued. The file will be overwritten and no backup will be created")
                     pass
             else:
                 print(f"Crearing backup")
@@ -292,7 +293,7 @@ def setup_args() -> argparse.ArgumentParser:
 
     parser_install = subparsers.add_parser(
         "install", help="install udev and modprobe files. if these files already exist, a backup will be created.\
-                        (If a backup exists, the installation wont be completed.")
+                        (If a backup exists, the installation wont be completed).")
     parser_install.add_argument(
         "-p", "--powermode", type=int, choices=[0, 1, 2], default=2,
         help=(
@@ -320,6 +321,9 @@ def main(parser: argparse.ArgumentParser) -> None:
                 verify()
             elif args.state:
                 state()
+            else:
+                parser_info = parser.parse_args(["info", "--help"])
+                parser.print_help()
         case "install":
             install(args.powermode, args.enablefirmware, args.force)
         case "uninstall":
