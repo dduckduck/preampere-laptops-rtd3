@@ -1,16 +1,28 @@
 import os
 import argparse
-
+from typing import Callable, Any
 
 # =========================================================
 # Section: Config files
 # =========================================================
 
 SYS_FILES = {
-    "chassis": "/sys/class/dmi/id/chassis_type",
-    "acpi": "/sys/firmware/acpi/tables/DSDT",  # requires root access
-    "kernel": "/proc/version",
-    "s3": "/sys/power/mem_sleep"
+    "chassis": {
+        "path": "/sys/class/dmi/id/chassis_type",
+        "mode": 'r'
+    },
+    "acpi": {
+        "path": "/sys/firmware/acpi/tables/DSDT", "mode": 'rb'
+    },
+
+    "kernel": {
+        "path": "/proc/version",
+        "mode": 'r'
+    },
+    "s3": {
+        "path": "/sys/power/mem_sleep",
+        "mode": 'r'
+    }
 }
 
 DGPU_FILES = {
@@ -25,6 +37,7 @@ DGPU_FILES = {
 BAT_FILES = {
     "power_supply": "/sys/class/power_supply/",
     "power_now": "/sys/class/power_supply/{}/power_now",
+    "energy_now": "/sys/class/power_supply/{}/energy_now",
 }
 
 
@@ -52,6 +65,16 @@ options nvidia NVreg_EnableGpuFirmware={}
 """
     }
 }
+
+NVIDIA_FUNCTION = {
+    0: "VGA controller/3D controller",
+    1: "Audio device",
+    2: "USB xHCI Host controller",
+    3: "USB Type-c UCSI controller"
+}
+
+
+DATA_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
 
 
 # =========================================================
@@ -113,6 +136,10 @@ def _extract_data(value: str, data: str) -> str:
             output = data.strip()
         case "runtime_status":
             output = data.strip()
+        case "power_now":
+            output = int(data.strip())
+        case "energy_now":
+            output = int(data)
     return output
 
 
@@ -187,6 +214,43 @@ def _delete_file(file: str) -> None:
             print(f"Restoring backup: {path}.bak -> {path}")
             os.rename(path + ".bak", path)
     print("Uninstallation process completed.")
+
+
+# =========================================================
+# Section: Handlers
+# =========================================================
+
+def reg_handler(name: str):
+    def decorator(func: Callable[[str], dict[str, Any]]):
+        DATA_HANDLERS[name] = func
+        return func
+    return decorator
+
+
+@ reg_handler("kernel")
+def kernel_handler(data: str) -> dict[str, Any]:
+    output = "Unknown"
+    return output
+
+
+@ reg_handler("acpi")
+def acpi_handler(data: str) -> dict[str, Any]:
+    output = "Unknown"
+    return output
+
+
+@ reg_handler("chassis")
+def chassis_handler(data: str) -> dict[str, Any]:
+    output = "Unknown"
+    return output
+
+
+@ reg_handler("s3")
+def s3_handler(data: str) -> dict[str, Any]:
+    output = "Unknown"
+    return output
+
+
 # =========================================================
 # Section: Utilities
 # =========================================================
@@ -206,6 +270,28 @@ def _print_table(headers: list[str], rows: list[list[str]], margin: int = 2, nam
     print('=' * table_width)
 
 
+def _gpu_info(pci: str) -> dict:
+    pci_info = {"bus": -1, "id": -1, "function": "Unknown"}
+    pci_temp = pci.split(':')
+    if len(pci_temp) == 3:
+        pci_info["bus"] = pci_temp[1]
+        temp = pci_temp[2].split('.')
+        pci_info["function"] = NVIDIA_FUNCTION[int(temp[1])]
+        pci_info["id"] = temp[0]
+        for key, value in [(k, v) for (k, v) in DGPU_FILES.items() if k != "gpus"]:
+            data = _extract_data(key, _read_file(value.format(pci)))
+            pci_info[key] = data
+    return pci_info
+
+
+def _batt_info(batt: str) -> dict:
+    batt_info = {"name": batt}
+    for key, value in [(k, v) for (k, v) in BAT_FILES.items() if k != "power_supply"]:
+        data = _extract_data(key, _read_file(value.format(batt)))
+        batt_info[key] = data
+    batt_info["rem_time"] = batt_info["energy_now"]/batt_info["power_now"]
+
+
 # =========================================================
 # Section: Commands
 # =========================================================
@@ -215,37 +301,29 @@ def verify() -> dict:
     headers = ["Check", "Value", "Supported"]
     rows = []
     for key, value in SYS_FILES.items():
-        mode = 'rb' if key == "acpi" else 'r'
-        raw_file = _read_file(value, mode)
-        data = _extract_data(key, raw_file)
-        supported = _validate(key, data)
-        row = [key, data, str(supported)]
-        rows.append(row)
+        data = DATA_HANDLERS[key]("data")
+        print(data)
     _print_table(headers, rows, name="Requirements")
 
 
 def state() -> dict:
-    gpus_dirs = _list_dir(DGPU_FILES["gpus"])
-    gpus_dirs = [vga_func for vga_func in gpus_dirs if vga_func.split('.')[
-        1] == '0']
-    if len(gpus_dirs) > 1:
-        print("! More than one NVIDIA gpu is available.")
     headers = ["key", "value"]
     rows = []
-    for slot in gpus_dirs:
-        rows.append(["pci", slot])
-        for key, value in [(k, v) for (k, v) in DGPU_FILES.items() if k != "gpus"]:
-            raw_file = _read_file(value.format(slot))
-            data = _extract_data(key, raw_file)
-            row = [key, data]
-            rows.append(row)
+
+    gpus_dirs = _list_dir(DGPU_FILES["gpus"])
+    for pci in gpus_dirs:
+        data = _gpu_info(pci)
+        for k, v in data.items():
+            rows.append([k, v])
         rows.append(['-'*5, '-'*5])
+
     batts = [bat for bat in _list_dir(
         BAT_FILES["power_supply"]) if "BAT" in bat]
     for batt in batts:
         path = BAT_FILES["power_now"].format(batt)
         raw_value = _read_file(path)
         power_now = _power_watts(raw_value)
+        path = BAT_FILES["energy_now"].format(batt)
         row = [batt, f"{power_now:.2f} W"]
         rows.append(row)
     rows.append(['-'*5, '-'*5])
