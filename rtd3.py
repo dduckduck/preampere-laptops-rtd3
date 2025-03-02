@@ -6,6 +6,8 @@ from typing import Callable, Any
 # Section: Config files
 # =========================================================
 
+NVIDIA_GPUS_PATH = "/proc/driver/nvidia/gpus/"
+BATTS_PATH = "/sys/class/power_supply/"
 SYS_FILES = {
     "chassis": {
         "path": "/sys/class/dmi/id/chassis_type",
@@ -24,16 +26,13 @@ SYS_FILES = {
     }
 }
 
-NVIDIA_GPUS_PATH = "/proc/driver/nvidia/gpus/"
 NVIDIA_STATE = {
-    #    "model": "/proc/driver/nvidia/gpus/{}/information",
     "rtd3_status": "/proc/driver/nvidia/gpus/{}/power",
     "power_state": "/sys/bus/pci/devices/{}/power_state",
     "runtime_status": "/sys/bus/pci/devices/{}/power/runtime_status"
 }
 
 
-BATTS_PATH = "/sys/class/power_supply/"
 BATTS_STATE = {
     "power_now": "/sys/class/power_supply/{}/power_now",
     "energy_now": "/sys/class/power_supply/{}/energy_now",
@@ -65,11 +64,12 @@ options nvidia NVreg_EnableGpuFirmware={}
     }
 }
 
+
 NVIDIA_FUNCTION = {
-    0: "VGA controller/3D controller",
-    1: "Audio device",
-    2: "USB xHCI Host controller",
-    3: "USB Type-c UCSI controller"
+    "0": "VGA controller/3D controller",
+    "1": "Audio device",
+    "2": "USB xHCI Host controller",
+    "3": "USB Type-c UCSI controller"
 }
 
 
@@ -112,26 +112,6 @@ def _find_file(paths: list) -> str:
                 break
     except Exception as e:
         print(f"Could not find path :{str(e)}")
-    return output
-
-
-def _validate(value: str, data: str) -> bool:
-    output = False
-    match value:
-        case "kernel":
-            nums = data.split('.')
-            first, second = -1, -1
-            if nums and len(nums) >= 2:
-                first, second = (map(int, nums[:2]))
-            output = (first, second) >= (4, 18)
-        case "chassis":
-            output = ("10" == data)
-        case "acpi":
-            output = ("_PR0" in data and "_PR3" in data)
-        case "s3":
-            output = "deep" in data
-        case "udev":
-            output = NVIDIA_FILES["udev"]["value"] in data
     return output
 
 
@@ -279,6 +259,21 @@ def energy_now_handler(data: str) -> dict[str, Any]:
     return {"value": value}
 
 
+@handler(STATE_HANDLERS, "pci_info")
+def pci_handler(data: str) -> dict[str, Any]:
+    lines = data.strip().split(':')
+    domain = bus = device = function = -1
+    if len(lines) > 2:
+        domain = lines[0]
+        bus = lines[1]
+        device = lines[2]
+        temp = device.split('.')
+        if len(temp) > 1:
+            device = temp[0]
+            function = NVIDIA_FUNCTION[temp[1]]
+
+    return {"domain": domain, "bus": bus, "device": device, "function": function}
+
 # =========================================================
 # Section: Utilities
 # =========================================================
@@ -296,28 +291,6 @@ def _print_table(headers: list[str], rows: list[list[str]], margin: int = 2, nam
         row_str = "".join(f"{val:<{col_width}}" for val in row)
         print(row_str)
     print('=' * table_width)
-
-
-# def _gpu_info(pci: str) -> dict:
-#    pci_info = {"bus": -1, "id": -1, "function": "Unknown"}
-#    pci_temp = pci.split(':')
-#    if len(pci_temp) == 3:
-#        pci_info["bus"] = pci_temp[1]
-#        temp = pci_temp[2].split('.')
-#        pci_info["function"] = NVIDIA_FUNCTION[int(temp[1])]
-#        pci_info["id"] = temp[0]
-#        for key, value in [(k, v) for (k, v) in NVIDIA_STATE.items() if k != "gpus"]:
-#            data = _extract_data(key, _read_file(value.format(pci)))
-#            pci_info[key] = data
-#    return pci_info
-
-
-# def _batt_info(batt: str) -> dict:
-    # batt_info = {"name": batt}
-    # for key, value in [(k, v) for (k, v) in BAT_FILES.items() if k != "power_supply"]:
-    # data = _extract_data(key, _read_file(value.format(batt)))
-    # batt_info[key] = data
-    # batt_info["rem_time"] = batt_info["energy_now"]/batt_info["power_now"]
 
 
 # =========================================================
@@ -341,6 +314,9 @@ def state() -> dict:
 
     gpus_dirs = _list_dir(NVIDIA_GPUS_PATH)
     for pci in gpus_dirs:
+        data = pci_handler(pci)
+        for key, value in data.items():
+            rows.append([key, value])
         for key, value in NVIDIA_STATE.items():
             raw = _read_file(value.format(pci))
             data = STATE_HANDLERS[key](raw)
@@ -348,6 +324,7 @@ def state() -> dict:
         rows.append(['-'*5, '-'*5])
     batts = _list_dir(BATTS_PATH)
     for batt in [batt for batt in batts if "BAT" in batt]:
+        rows.append(["battery", batt])
         temp = []
         for key, value in BATTS_STATE.items():
             raw = _read_file(value.format(batt))
@@ -356,6 +333,7 @@ def state() -> dict:
             rows.append([key]+[value for key, value in data.items()])
         rows.append(["Remaining time", temp[1] /
                     temp[0] if len(temp) > 1 and temp[0] != 0 else -1])
+        rows.append(['-'*5, '-'*5])
     _print_table(headers, rows, name="State")
 
 
