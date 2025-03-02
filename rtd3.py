@@ -14,7 +14,6 @@ SYS_FILES = {
     "acpi": {
         "path": "/sys/firmware/acpi/tables/DSDT", "mode": 'rb'
     },
-
     "kernel": {
         "path": "/proc/version",
         "mode": 'r'
@@ -25,8 +24,8 @@ SYS_FILES = {
     }
 }
 
-DGPU_FILES = {
-    "gpus": "/proc/driver/nvidia/gpus/",
+NVIDIA_GPUS_PATH = "/proc/driver/nvidia/gpus/"
+NVIDIA_STATE = {
     #    "model": "/proc/driver/nvidia/gpus/{}/information",
     "rtd3_status": "/proc/driver/nvidia/gpus/{}/power",
     "power_state": "/sys/bus/pci/devices/{}/power_state",
@@ -34,8 +33,8 @@ DGPU_FILES = {
 }
 
 
-BAT_FILES = {
-    "power_supply": "/sys/class/power_supply/",
+BATTS_PATH = "/sys/class/power_supply/"
+BATTS_STATE = {
     "power_now": "/sys/class/power_supply/{}/power_now",
     "energy_now": "/sys/class/power_supply/{}/energy_now",
 }
@@ -74,8 +73,8 @@ NVIDIA_FUNCTION = {
 }
 
 
-DATA_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
-
+VERIFY_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
+STATE_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
 
 # =========================================================
 # Section: Basic operations
@@ -116,33 +115,6 @@ def _find_file(paths: list) -> str:
     return output
 
 
-def _extract_data(value: str, data: str) -> str:
-    output = ""
-    match value:
-        case "kernel":
-            temp = data.strip().split()
-            output = temp[2] if len(temp) >= 3 else "Unknown"
-        case "chassis":
-            output = data.strip()
-        case "acpi":
-            output = ", ".join(tag for tag in ["_PR0", "_PR3"] if tag in data)
-        case "s3":
-            output = "deep" if "deep" in data else "None"
-        case "rtd3_status":
-            temp = data.splitlines()[0]
-            if "Runtime D3 status" in temp:
-                output = temp.split(':', 1)[1].strip()
-        case "power_state":
-            output = data.strip()
-        case "runtime_status":
-            output = data.strip()
-        case "power_now":
-            output = int(data.strip())
-        case "energy_now":
-            output = int(data)
-    return output
-
-
 def _validate(value: str, data: str) -> bool:
     output = False
     match value:
@@ -161,15 +133,6 @@ def _validate(value: str, data: str) -> bool:
         case "udev":
             output = NVIDIA_FILES["udev"]["value"] in data
     return output
-
-
-def _power_watts(value: str) -> int:
-    power_draw = -1
-    try:
-        power_draw = int(value)
-    except Exception as e:
-        print(f"Clould not obtain power draw {str(e)}")
-    return power_draw*(10**-6)
 
 
 def _create_file(path: str, data: str, force: bool = False):
@@ -216,39 +179,104 @@ def _delete_file(file: str) -> None:
     print("Uninstallation process completed.")
 
 
-# =========================================================
-# Section: Handlers
-# =========================================================
-
-def reg_handler(name: str):
+def handler(dict_handler: dict[str, Callable[[str], dict[str, Any]]], name: str):
     def decorator(func: Callable[[str], dict[str, Any]]):
-        DATA_HANDLERS[name] = func
+        dict_handler[name] = func
         return func
     return decorator
 
+# =========================================================
+# Section: --verify Handlers
+# =========================================================
 
-@ reg_handler("kernel")
+
+@handler(VERIFY_HANDLERS, "kernel")
 def kernel_handler(data: str) -> dict[str, Any]:
-    output = "Unknown"
-    return output
+    parts = data.split()
+    version_str = parts[2] if len(parts) > 2 else "Unknown"
+    version_parts = version_str.split('.')
+    first, second = -1, -1
+    try:
+        if len(version_parts) >= 2:
+            first, second = map(int, version_parts[:2])
+    except ValueError:
+        first, second = -1, -1
+    supported = (first, second) >= (4, 18)
+    return {
+        "value": f"{first}.{second}",
+        "supported": str(supported)
+    }
 
 
-@ reg_handler("acpi")
+@handler(VERIFY_HANDLERS, "acpi")
 def acpi_handler(data: str) -> dict[str, Any]:
-    output = "Unknown"
-    return output
+    flags = ["_PR0", "_PR3"]
+    value = ""
+    for flag in flags:
+        if flag in data:
+            value += flag
+    supported = "_PR0" in value and "_PR3" in value
+    return {
+        "value": value,
+        "supported": str(supported)
+    }
 
 
-@ reg_handler("chassis")
+@handler(VERIFY_HANDLERS, "chassis")
 def chassis_handler(data: str) -> dict[str, Any]:
-    output = "Unknown"
-    return output
+    data = data.strip()
+    supported = "10" == data
+    return {"value": data, "supported": str(supported)}
 
 
-@ reg_handler("s3")
+@handler(VERIFY_HANDLERS, "s3")
 def s3_handler(data: str) -> dict[str, Any]:
-    output = "Unknown"
-    return output
+    data = data.strip()
+    supported = "deep" in data
+    return {"value": data, "supported": str(supported)}
+
+
+# =========================================================
+# Section: --state Handlers
+# =========================================================
+
+@handler(STATE_HANDLERS, "rtd3_status")
+def rtd3_handler(data: str) -> dict[str, Any]:
+    temp = data.splitlines()
+    temp = temp[0].split(':') if len(temp) > 1 else temp
+    value = temp[1].strip() if len(temp) > 1 else "Unknown"
+    return {"value": value}
+
+
+@handler(STATE_HANDLERS, "power_state")
+def power_state_handler(data: str) -> dict[str, Any]:
+    return {"value": data.strip()}
+
+
+@handler(STATE_HANDLERS, "runtime_status")
+def runtime_status_handler(data: str) -> dict[str, Any]:
+    return {"value": data.strip()}
+
+
+@handler(STATE_HANDLERS, "power_now")
+def power_now_handler(data: str) -> dict[str, Any]:
+    value = -1
+    try:
+        value = int(data.strip())
+        value *= (10**-6)
+    except ValueError as e:
+        print(e)
+    return {"value": value}
+
+
+@handler(STATE_HANDLERS, "energy_now")
+def energy_now_handler(data: str) -> dict[str, Any]:
+    try:
+        value = int(data.strip())
+        value *= (10**-6)
+    except ValueError as e:
+        print(e)
+    return {"value": value}
 
 
 # =========================================================
@@ -270,26 +298,26 @@ def _print_table(headers: list[str], rows: list[list[str]], margin: int = 2, nam
     print('=' * table_width)
 
 
-def _gpu_info(pci: str) -> dict:
-    pci_info = {"bus": -1, "id": -1, "function": "Unknown"}
-    pci_temp = pci.split(':')
-    if len(pci_temp) == 3:
-        pci_info["bus"] = pci_temp[1]
-        temp = pci_temp[2].split('.')
-        pci_info["function"] = NVIDIA_FUNCTION[int(temp[1])]
-        pci_info["id"] = temp[0]
-        for key, value in [(k, v) for (k, v) in DGPU_FILES.items() if k != "gpus"]:
-            data = _extract_data(key, _read_file(value.format(pci)))
-            pci_info[key] = data
-    return pci_info
+# def _gpu_info(pci: str) -> dict:
+#    pci_info = {"bus": -1, "id": -1, "function": "Unknown"}
+#    pci_temp = pci.split(':')
+#    if len(pci_temp) == 3:
+#        pci_info["bus"] = pci_temp[1]
+#        temp = pci_temp[2].split('.')
+#        pci_info["function"] = NVIDIA_FUNCTION[int(temp[1])]
+#        pci_info["id"] = temp[0]
+#        for key, value in [(k, v) for (k, v) in NVIDIA_STATE.items() if k != "gpus"]:
+#            data = _extract_data(key, _read_file(value.format(pci)))
+#            pci_info[key] = data
+#    return pci_info
 
 
-def _batt_info(batt: str) -> dict:
-    batt_info = {"name": batt}
-    for key, value in [(k, v) for (k, v) in BAT_FILES.items() if k != "power_supply"]:
-        data = _extract_data(key, _read_file(value.format(batt)))
-        batt_info[key] = data
-    batt_info["rem_time"] = batt_info["energy_now"]/batt_info["power_now"]
+# def _batt_info(batt: str) -> dict:
+    # batt_info = {"name": batt}
+    # for key, value in [(k, v) for (k, v) in BAT_FILES.items() if k != "power_supply"]:
+    # data = _extract_data(key, _read_file(value.format(batt)))
+    # batt_info[key] = data
+    # batt_info["rem_time"] = batt_info["energy_now"]/batt_info["power_now"]
 
 
 # =========================================================
@@ -301,8 +329,9 @@ def verify() -> dict:
     headers = ["Check", "Value", "Supported"]
     rows = []
     for key, value in SYS_FILES.items():
-        data = DATA_HANDLERS[key]("data")
-        print(data)
+        raw = _read_file(value["path"], value["mode"])
+        data = VERIFY_HANDLERS[key](raw)
+        rows.append([key]+[value for key, value in data.items()])
     _print_table(headers, rows, name="Requirements")
 
 
@@ -310,28 +339,24 @@ def state() -> dict:
     headers = ["key", "value"]
     rows = []
 
-    gpus_dirs = _list_dir(DGPU_FILES["gpus"])
+    gpus_dirs = _list_dir(NVIDIA_GPUS_PATH)
     for pci in gpus_dirs:
-        data = _gpu_info(pci)
-        for k, v in data.items():
-            rows.append([k, v])
+        for key, value in NVIDIA_STATE.items():
+            raw = _read_file(value.format(pci))
+            data = STATE_HANDLERS[key](raw)
+            rows.append([key]+[value for key, value in data.items()])
         rows.append(['-'*5, '-'*5])
-
-    batts = [bat for bat in _list_dir(
-        BAT_FILES["power_supply"]) if "BAT" in bat]
-    for batt in batts:
-        path = BAT_FILES["power_now"].format(batt)
-        raw_value = _read_file(path)
-        power_now = _power_watts(raw_value)
-        path = BAT_FILES["energy_now"].format(batt)
-        row = [batt, f"{power_now:.2f} W"]
-        rows.append(row)
-    rows.append(['-'*5, '-'*5])
-    for k in NVIDIA_FILES.keys():
-        valid_path = _find_file(NVIDIA_FILES[k]["path"])
-        row = [k, f"{'Found' if valid_path else 'Not found'}"]
-        rows.append(row)
-    _print_table(headers, rows, name="Power supply")
+    batts = _list_dir(BATTS_PATH)
+    for batt in [batt for batt in batts if "BAT" in batt]:
+        temp = []
+        for key, value in BATTS_STATE.items():
+            raw = _read_file(value.format(batt))
+            data = STATE_HANDLERS[key](raw)
+            temp.append(data["value"])
+            rows.append([key]+[value for key, value in data.items()])
+        rows.append(["Remaining time", temp[1] /
+                    temp[0] if len(temp) > 1 and temp[0] != 0 else -1])
+    _print_table(headers, rows, name="State")
 
 
 def install(power_mode: int, enable_firmware: int, force: bool) -> None:
@@ -377,8 +402,7 @@ def setup_args() -> argparse.ArgumentParser:
         help=(
             "Configure NVIDIA dynamic power management (NVreg_DynamicPowerManagement): \
             0 - disables D3 power management, 1 - enables coarse-grained power control, 2 - enable fine-grained power control.\
-            Default value is 2. \
-            For more information: https://download.nvidia.com/XFree86/Linux-x86_64/565.77/README/dynamicpowermanagement.html"
+            Default value is 2."
         )
     )
     parser_install.add_argument("-e", "--enablefirmware", type=int, choices=[0, 1], default=0,
