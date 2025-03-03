@@ -2,8 +2,8 @@ This project is provided "as is".
 
 # RTD3 Tool
 
-This utility provides a small fix to activate RTD3 support on NVIDIA GPUs with Ampere architecture. 
-It provides a convenient way to verify the eligibility of your system as well as monitor its status.
+This utility provides a small fix to activate RTD3 support on NVIDIA GPUs with pre Ampere architecture. 
+It offers a convenient way to verify the eligibility of your system as well as monitor its status.
 
 ## Context
 As you may already know, there are tools that allow you to switch between integrated and dedicated GPUs.
