@@ -31,14 +31,20 @@ Four commands are supported at this moment:
 
 - **state**:  
   Provides information about the current state.
+
+
   ```python rtd3.py --state```
 
 - **install**:  
   Installs the udev rule and modprobe parameters. (Consider backing up your files before installing the files)
+
+
   ```sudo python rtd3.py --install```
 
 - **uninstall**:  
   Removes the udev rule and modprobe files.
+
+
   ```sudo python rtd3.py --uninstall```
 
 # References
