@@ -25,6 +25,8 @@ Four commands are supported at this moment:
 
 - **verify**:  
   Verifies if the system requirements are met.
+
+
   ```sudo python rtd3.py --verify```
 
 - **state**:  
