@@ -6,8 +6,13 @@ from typing import Callable, Any
 # Section: Config files
 # =========================================================
 
+
+VERIFY_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
+STATE_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
 NVIDIA_GPUS_PATH = "/proc/driver/nvidia/gpus/"
 BATTS_PATH = "/sys/class/power_supply/"
+
+
 SYS_FILES = {
     "chassis": {
         "path": "/sys/class/dmi/id/chassis_type",
@@ -26,6 +31,7 @@ SYS_FILES = {
     }
 }
 
+
 NVIDIA_STATE = {
     "rtd3_status": "/proc/driver/nvidia/gpus/{}/power",
     "power_state": "/sys/bus/pci/devices/{}/power_state",
@@ -39,32 +45,6 @@ BATTS_STATE = {
 }
 
 
-NVIDIA_FILES = {
-    "udev": {  # Requires root access
-        "path": [
-            "/etc/udev/rules.d/80-nvidia-pm.rules",
-            "/lib/udev/rules.d/80-nvidia-pm.rules"
-        ],
-        "value": """# Enable runtime PM for NVIDIA VGA/3D controller devices on driver bind
-ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", TEST=="power/control", ATTR{power/control}="auto"
-ACTION=="bind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", TEST=="power/control", ATTR{power/control}="auto"
-
-# Disable runtime PM for NVIDIA VGA/3D controller devices on driver unbind
-ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030000", TEST=="power/control", ATTR{power/control}="on"
-ACTION=="unbind", SUBSYSTEM=="pci", ATTR{vendor}=="0x10de", ATTR{class}=="0x030200", TEST=="power/control", ATTR{power/control}="on"
-"""},
-    "modprobe": {  # Requires root access
-        "path": [
-            "/etc/modprobe.d/nvidia-pm.conf",
-            "/etc/modprobe.d/nvidia.conf"
-        ],
-        "value": """options nvidia NVreg_DynamicPowerManagement=0x0{}
-options nvidia NVreg_EnableGpuFirmware={}
-"""
-    }
-}
-
-
 NVIDIA_FUNCTION = {
     "0": "VGA controller/3D controller",
     "1": "Audio device",
@@ -73,12 +53,32 @@ NVIDIA_FUNCTION = {
 }
 
 
-VERIFY_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
-STATE_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
+NVIDIA_FILES = {
+    "udev": {
+        "src": "80-nvidia-pm.rules",
+        "dst": "/etc/udev/rules.d/"
+    },
+    "modprobe": {
+        "src": "nvidia-pm.conf",
+        "dst": "/etc/modprobe.d/"
+    }
+}
+
 
 # =========================================================
 # Section: Basic operations
 # =========================================================
+
+
+def _create_file(file: str):
+    try:
+        src = NVIDIA_FILES[file]["src"]
+        dst = NVIDIA_FILES[file]["dst"]
+        with open(src, 'r') as f:
+            with open(os.path.join(dst, src), 'w') as dst_f:
+                dst_f.write(f.read())
+    except Exception as e:
+        print(str(e))
 
 
 def _read_file(path: str, mode: str = 'r') -> str:
@@ -103,60 +103,9 @@ def _list_dir(path: str) -> list:
     return output
 
 
-def _find_file(paths: list) -> str:
-    output = ""
-    try:
-        for path in paths:
-            if os.path.exists(path):
-                output = path
-                break
-    except Exception as e:
-        print(f"Could not find path :{str(e)}")
-    return output
-
-
-def _create_file(path: str, data: str, force: bool = False):
-    print(f"Creating: {path}")
-    try:
-        if os.path.exists(path):
-            print(f"{path} already exists. Creating backup...")
-            backup_path = f"{path}.bak"
-            if os.path.exists(backup_path):
-                if not force:
-                    print(
-                        "Backup already exists. The operation is canceled. Use --force to overwrite.")
-                    return
-                else:
-                    print(
-                        "--force is issued. The file will be overwritten and no backup will be created")
-                    pass
-            else:
-                print(f"Crearing backup")
-                os.rename(path, backup_path)
-                print(f"Backup created at {backup_path}")
-
-        if not os.path.exists(os.path.dirname(path)):
-            print(f"Creating new file {path}")
-            os.makedirs(os.path.dirname(path))
-
-        with open(path, 'w') as f:
-            print(f"Writing data to : {path}")
-            f.write(data)
-        print(f"Successfully installed {path}")
-    except Exception as e:
-        print(f"Could not finish the installation {str(e)}")
-
-
-def _delete_file(file: str) -> None:
-    print(f"Deleting {file}")
-    for path in NVIDIA_FILES[file]["path"]:
-        if os.path.exists(path):
-            print(f"Removing: {path}")
-            os.remove(path)
-        if os.path.exists(path + ".bak"):
-            print(f"Restoring backup: {path}.bak -> {path}")
-            os.rename(path + ".bak", path)
-    print("Uninstallation process completed.")
+# =========================================================
+# Section: Handlers
+# =========================================================
 
 
 def handler(dict_handler: dict[str, Callable[[str], dict[str, Any]]], name: str):
@@ -166,7 +115,7 @@ def handler(dict_handler: dict[str, Callable[[str], dict[str, Any]]], name: str)
     return decorator
 
 # =========================================================
-# Section: --verify Handlers
+# Section: info --verify Handlers
 # =========================================================
 
 
@@ -217,7 +166,7 @@ def s3_handler(data: str) -> dict[str, Any]:
 
 
 # =========================================================
-# Section: --state Handlers
+# Section: info --state Handlers
 # =========================================================
 
 @handler(STATE_HANDLERS, "rtd3_status")
@@ -271,7 +220,6 @@ def pci_handler(data: str) -> dict[str, Any]:
         if len(temp) > 1:
             device = temp[0]
             function = NVIDIA_FUNCTION[temp[1]]
-
     return {"domain": domain, "bus": bus, "device": device, "function": function}
 
 # =========================================================
@@ -311,7 +259,6 @@ def verify() -> dict:
 def state() -> dict:
     headers = ["key", "value"]
     rows = []
-
     gpus_dirs = _list_dir(NVIDIA_GPUS_PATH)
     for pci in gpus_dirs:
         data = pci_handler(pci)
@@ -337,23 +284,23 @@ def state() -> dict:
     _print_table(headers, rows, name="State")
 
 
-def install(power_mode: int, enable_firmware: int, force: bool) -> None:
-    print("Starting installation")
-    udev_path = _find_file(NVIDIA_FILES["udev"]["path"])
-    udev_path = udev_path if udev_path else NVIDIA_FILES["udev"]["path"][0]
-    udev_data = NVIDIA_FILES["udev"]["value"]
-    _create_file(udev_path, udev_data, force)
-
-    modprobe_path = _find_file(NVIDIA_FILES["modprobe"]["path"])
-    modprobe_path = modprobe_path if modprobe_path else NVIDIA_FILES["modprobe"]["path"][0]
-    modprobe_data = NVIDIA_FILES["modprobe"]["value"].format(
-        power_mode, enable_firmware)
-    _create_file(modprobe_path, modprobe_data, force)
+def install() -> None:
+    _create_file("udev")
+    _create_file("modprobe")
 
 
 def uninstall() -> None:
-    _delete_file("udev")
-    _delete_file("modprobe")
+    try:
+        src = NVIDIA_FILES["udev"]["src"]
+        dst = NVIDIA_FILES["udev"]["dst"]
+        os.remove(os.path.join(dst, src))
+
+        src = NVIDIA_FILES["modprobe"]["src"]
+        dst = NVIDIA_FILES["modprobe"]["dst"]
+        os.remove(os.path.join(dst, src))
+    except Exception as e:
+        print(str(e))
+
 
 # =========================================================
 # Section: Main and arguments
@@ -362,54 +309,32 @@ def uninstall() -> None:
 
 def setup_args() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="RTD3 Tool: A utility for managing and diagnosing NVIDIA GPU power management on hybrid laptops.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    parser_info = subparsers.add_parser("info", help="Shows info")
-    parser_info.add_argument("-v", "--verify", action="store_true",
-                             help="Verifies system requirements as specified in nvidia docs.")
-    parser_info.add_argument("-s", "--state", action="store_true",
-                             help="Show the current status of the dGPU, battery and indicate if the udev and modprobe files are present.\
-                             If more than one dgpu or battery available, individual information for each device will be shown")
-
-    parser_install = subparsers.add_parser(
-        "install", help="install udev and modprobe files. if these files already exist, a backup will be created.\
-                        (If a backup exists, the installation wont be completed).")
-    parser_install.add_argument(
-        "-p", "--powermode", type=int, choices=[0, 1, 2], default=2,
-        help=(
-            "Configure NVIDIA dynamic power management (NVreg_DynamicPowerManagement): \
-            0 - disables D3 power management, 1 - enables coarse-grained power control, 2 - enable fine-grained power control.\
-            Default value is 2."
-        )
+        description="RTD3 Tool: A utility for managing and diagnosing NVIDIA GPU power management on hybrid laptops."
     )
-    parser_install.add_argument("-e", "--enablefirmware", type=int, choices=[0, 1], default=0,
-                                help="Enables (1) or disables (0) GpuFirmware. Only works on the closed source driver. Default 0.")
-    parser_install.add_argument("-f", "--force", action="store_true", default=False,
-                                help="When this flag is enabled, the udev and modprobe files will be overwritten without creatng a backup. Proceed with caution.")
-
-    parser_uninstall = subparsers.add_parser(
-        "uninstall", help="Deletes udev and modprobe files. If backups are available, the original content will be restored.")
+    parser.add_argument("-v", "--verify", action="store_true",
+                        help="Verifies system requirements as specified in NVIDIA docs.")
+    parser.add_argument("-s", "--state", action="store_true",
+                        help="Show the current status of the dGPU, battery, and indicate if the udev and modprobe files are present.")
+    parser.add_argument("-i", "--install", action="store_true",
+                        help="Installs required udev and modprobe files.")
+    parser.add_argument("-u", "--uninstall", action="store_true",
+                        help="Removes udev and modprobe files, restoring backups if available.")
     return parser
 
 
-def main(parser: argparse.ArgumentParser) -> None:
+def main(parser: argparse.ArgumentParser):
     args = parser.parse_args()
-    match(args.command):
-        case "info":
-            if args.verify:
-                verify()
-            elif args.state:
-                state()
-            else:
-                parser_info = parser.parse_args(["info", "--help"])
-                parser.print_help()
-        case "install":
-            install(args.powermode, args.enablefirmware, args.force)
-        case "uninstall":
-            uninstall()
-        case _:
-            parser.print_help()
+
+    if args.verify:
+        verify()
+    elif args.state:
+        state()
+    elif args.install:
+        install()
+    elif args.uninstall:
+        uninstall()
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
