@@ -71,36 +71,26 @@ NVIDIA_FILES = {
 
 
 def _create_file(file: str):
-    try:
-        src = NVIDIA_FILES[file]["src"]
-        dst = NVIDIA_FILES[file]["dst"]
-        with open(src, 'r') as f:
-            with open(os.path.join(dst, src), 'w') as dst_f:
-                dst_f.write(f.read())
-    except Exception as e:
-        print(str(e))
+    print(f"Creating {file}")
+    src = NVIDIA_FILES[file]["src"]
+    dst = NVIDIA_FILES[file]["dst"]
+    with open(src, 'r') as f:
+        with open(os.path.join(dst, src), 'w') as dst_f:
+            dst_f.write(f.read())
+    print(f"Created {file}")
+
+
+def _delete_file(path: str):
+    print(f"Deleting: {path}")
+    os.remove(path)
+    print(f"Deleted: {path}")
 
 
 def _read_file(path: str, mode: str = 'r') -> str:
     data = ""
-    try:
-        with open(path, mode) as f:
-            if mode == "rb":
-                data = f.read().decode(errors="ignore")
-            else:
-                data = f.read()
-    except Exception as e:
-        print(f"Could not read {path} {str(e)}")
+    with open(path, mode) as f:
+        data = f.read().decode(errors="ignore") if mode == "rb" else f.read()
     return data
-
-
-def _list_dir(path: str) -> list:
-    output = []
-    try:
-        output = os.listdir(path)
-    except Exception as e:
-        print(f"Could not list {path} {str(e)}")
-    return output
 
 
 # =========================================================
@@ -194,17 +184,18 @@ def power_now_handler(data: str) -> dict[str, Any]:
         value = int(data.strip())
         value *= (10**-6)
     except ValueError as e:
-        print(e)
+        print(str(e))
     return {"value": value}
 
 
 @handler(STATE_HANDLERS, "energy_now")
 def energy_now_handler(data: str) -> dict[str, Any]:
+    value = -1
     try:
         value = int(data.strip())
         value *= (10**-6)
     except ValueError as e:
-        print(e)
+        print(str(e))
     return {"value": value}
 
 
@@ -259,7 +250,7 @@ def verify() -> dict:
 def state() -> dict:
     headers = ["key", "value"]
     rows = []
-    gpus_dirs = _list_dir(NVIDIA_GPUS_PATH)
+    gpus_dirs = os.listdir(NVIDIA_GPUS_PATH)
     for pci in gpus_dirs:
         data = pci_handler(pci)
         for key, value in data.items():
@@ -269,7 +260,7 @@ def state() -> dict:
             data = STATE_HANDLERS[key](raw)
             rows.append([key]+[value for key, value in data.items()])
         rows.append(['-'*5, '-'*5])
-    batts = _list_dir(BATTS_PATH)
+    batts = os.listdir(BATTS_PATH)
     for batt in [batt for batt in batts if "BAT" in batt]:
         rows.append(["battery", batt])
         temp = []
@@ -285,21 +276,29 @@ def state() -> dict:
 
 
 def install() -> None:
+    print("=== Installation started ===")
+    print("Copying udev file...")
     _create_file("udev")
+    print("Udev file installed successfully.")
+    print("Copying modprobe file...")
     _create_file("modprobe")
+    print("Modprobe file installed successfully.")
+    print("=== Installation finished ===")
 
 
 def uninstall() -> None:
-    try:
-        src = NVIDIA_FILES["udev"]["src"]
-        dst = NVIDIA_FILES["udev"]["dst"]
-        os.remove(os.path.join(dst, src))
-
-        src = NVIDIA_FILES["modprobe"]["src"]
-        dst = NVIDIA_FILES["modprobe"]["dst"]
-        os.remove(os.path.join(dst, src))
-    except Exception as e:
-        print(str(e))
+    print("=== Uninstallation started ===")
+    udev_path = os.path.join(
+        NVIDIA_FILES["udev"]["dst"], NVIDIA_FILES["udev"]["src"])
+    modprobe_path = os.path.join(
+        NVIDIA_FILES["modprobe"]["dst"], NVIDIA_FILES["modprobe"]["src"])
+    print(f"Deleting file: {udev_path}")
+    _delete_file(udev_path)
+    print("Udev file deleted successfully.")
+    print(f"Deleting file: {modprobe_path}")
+    _delete_file(modprobe_path)
+    print("Modprobe file deleted successfully.")
+    print("=== Uninstallation finished ===")
 
 
 # =========================================================
@@ -322,7 +321,8 @@ def setup_args() -> argparse.ArgumentParser:
     return parser
 
 
-def main(parser: argparse.ArgumentParser):
+def main():
+    parser = setup_args()
     args = parser.parse_args()
 
     if args.verify:
@@ -338,5 +338,4 @@ def main(parser: argparse.ArgumentParser):
 
 
 if __name__ == "__main__":
-    parser = setup_args()
-    main(parser)
+    main()
