@@ -20,7 +20,17 @@ Determining whether your system is compatible can be a complex process, especial
 - python >= 3.10
 - NVIDIA propietary driver
 
+# Installation
+
+Clone repository
+
+
+```bash
+git clone https://github.com/dduckduck/preampere-laptops-rtd3
+```
+
 # Usage
+
 Four commands are supported at this moment:
 
 - **verify**:  
