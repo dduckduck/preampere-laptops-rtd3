@@ -2,7 +2,7 @@
 from setuptools import setup
 
 setup(
-    name="rtd3-tool",
+    name="rtd3",
     version="0.1.0",
     description="Utility to verify NVIDIA requirements for RTD3 and monitor the current dGPU state",
     author="Timur Sorokin",
@@ -13,7 +13,7 @@ setup(
     py_modules=["rtd3"],
     entry_points={
         "console_scripts": [
-            "rtd3-tool=rtd3-tool:main",
+            "rtd3=rtd3:main",
         ]
     },
     classifiers=[
