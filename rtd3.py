@@ -3,7 +3,7 @@ import argparse
 from typing import Callable, Any
 
 # =========================================================
-# Section: Config files
+# Section: Configs
 # =========================================================
 
 
@@ -11,6 +11,13 @@ VERIFY_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
 STATE_HANDLERS: dict[str, Callable[[str], dict[str, Any]]] = {}
 NVIDIA_GPUS_PATH = "/proc/driver/nvidia/gpus/"
 BATTS_PATH = "/sys/class/power_supply/"
+NOTEBOOK_CHASSIS = ["8", "9", "10", "14"]
+NVIDIA_FUNCTION = {
+    "0": "VGA controller/3D controller",
+    "1": "Audio device",
+    "2": "USB xHCI Host controller",
+    "3": "USB Type-c UCSI controller"
+}
 
 
 SYS_FILES = {
@@ -42,14 +49,6 @@ NVIDIA_STATE = {
 BATTS_STATE = {
     "power_now": "/sys/class/power_supply/{}/power_now",
     "energy_now": "/sys/class/power_supply/{}/energy_now",
-}
-
-
-NVIDIA_FUNCTION = {
-    "0": "VGA controller/3D controller",
-    "1": "Audio device",
-    "2": "USB xHCI Host controller",
-    "3": "USB Type-c UCSI controller"
 }
 
 
@@ -144,7 +143,7 @@ def acpi_handler(data: str) -> dict[str, Any]:
 @handler(VERIFY_HANDLERS, "chassis")
 def chassis_handler(data: str) -> dict[str, Any]:
     data = data.strip()
-    supported = "10" == data
+    supported = data in NOTEBOOK_CHASSIS
     return {"value": data, "supported": str(supported)}
 
 
@@ -313,11 +312,11 @@ def setup_args() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verify", action="store_true",
                         help="Verifies system requirements as specified in NVIDIA docs.")
     parser.add_argument("-s", "--state", action="store_true",
-                        help="Show the current status of the dGPU, battery, and indicate if the udev and modprobe files are present.")
+                        help="Shows the current status of the dGPU and battery.")
     parser.add_argument("-i", "--install", action="store_true",
                         help="Installs required udev and modprobe files.")
     parser.add_argument("-u", "--uninstall", action="store_true",
-                        help="Removes udev and modprobe files, restoring backups if available.")
+                        help="Removes udev and modprobe files.")
     return parser
 
 
